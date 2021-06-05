@@ -51,6 +51,7 @@ public:
     virtual int GetCurrentRomBank0Index();
     virtual u8* GetCurrentRomBank1();
     virtual int GetCurrentRomBank1Index();
+    virtual size_t GetDefaultROMSize() const { return 0x8000; };
     virtual u8* GetRTCMemory();
     virtual void SaveState(std::ostream& stream);
     virtual void LoadState(std::istream& stream);

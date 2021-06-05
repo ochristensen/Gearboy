@@ -36,6 +36,7 @@ class MBC2MemoryRule;
 class MBC3MemoryRule;
 class MBC5MemoryRule;
 class MultiMBC1MemoryRule;
+class FullyWriteableMemoryRule;
 class MemoryRule;
 
 class GearboyCore
@@ -103,6 +104,7 @@ private:
     MBC2MemoryRule* m_pMBC2MemoryRule;
     MBC3MemoryRule* m_pMBC3MemoryRule;
     MBC5MemoryRule* m_pMBC5MemoryRule;
+    FullyWriteableMemoryRule* m_pFullyWriteableMemoryRule;
     MultiMBC1MemoryRule* m_pMultiMBC1MemoryRule;
     bool m_bCGB;
     bool m_bPaused;

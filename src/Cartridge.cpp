@@ -299,7 +299,7 @@ bool Cartridge::LoadFromBuffer(const u8* buffer, int size)
 
 void Cartridge::CheckCartridgeType(int type)
 {
-    if ((type != 0xEA) && (GetROMSize() == 0))
+    if ((type != 0xEA) && (type != 0x07) && (GetROMSize() == 0))
         type = 0;
 
     switch (type)
@@ -413,6 +413,10 @@ void Cartridge::CheckCartridgeType(int type)
             // HuC3
             m_Type = CartridgeNotSupported;
             Log("--> ** This cartridge is not supported. Type: %d", type);
+            break;
+        case 0x07:
+            // Custom fully writeable
+            m_Type = CatridgeFullyWriteable;
             break;
         default:
             m_Type = CartridgeNotSupported;
@@ -639,6 +643,9 @@ bool Cartridge::GatherMetadata()
             break;
         case Cartridge::CartridgeMBC5:
             Log("MBC5 found");
+            break;
+        case Cartridge::CatridgeFullyWriteable:
+            Log("FullyWriteable found");
             break;
         case Cartridge::CartridgeNotSupported:
             Log("Cartridge not supported!!");

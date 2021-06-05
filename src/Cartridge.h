@@ -34,6 +34,7 @@ public:
         CartridgeMBC3,
         CartridgeMBC5,
         CartridgeMBC1Multi,
+        CatridgeFullyWriteable,
         CartridgeNotSupported
     };
 

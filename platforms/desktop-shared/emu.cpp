@@ -427,6 +427,9 @@ static const char* get_mbc(Cartridge::CartridgeTypes type)
     case Cartridge::CartridgeMBC5:
         return "MBC 5";
         break;
+    case Cartridge::CatridgeFullyWriteable:
+        return "Fully Writeable 8K";
+        break;
     case Cartridge::CartridgeNotSupported:
         return "Not Supported";
         break;

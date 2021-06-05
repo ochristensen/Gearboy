@@ -1175,6 +1175,8 @@ static Cartridge::CartridgeTypes get_mbc(int index)
             return Cartridge::CartridgeMBC5;
         case 6:
             return Cartridge::CartridgeMBC1Multi;
+        case 7:
+            return Cartridge::CatridgeFullyWriteable;
         default:
             return Cartridge::CartridgeNotSupported;
     }

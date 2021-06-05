@@ -17,6 +17,7 @@
  *
  */
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include "Memory.h"
@@ -239,7 +240,7 @@ u8* Memory::GetMemoryMap()
 void Memory::LoadBank0and1FromROM(u8* pTheROM)
 {
     // loads the first 32KB only (bank 0 and 1)
-    for (int i = 0; i < 0x8000; i++)
+    for (int i = 0; i < m_pCurrentMemoryRule->GetDefaultROMSize(); i++)
     {
         m_pMap[i] = pTheROM[i];
     }

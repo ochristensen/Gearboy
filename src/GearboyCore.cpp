@@ -33,6 +33,7 @@
 #include "MBC3MemoryRule.h"
 #include "MBC5MemoryRule.h"
 #include "MultiMBC1MemoryRule.h"
+#include "fully_writeable_memory_rule.h"
 
 GearboyCore::GearboyCore()
 {
@@ -847,6 +848,9 @@ void GearboyCore::InitMemoryRules()
     m_pMBC5MemoryRule = new MBC5MemoryRule(m_pProcessor, m_pMemory,
             m_pVideo, m_pInput, m_pCartridge, m_pAudio);
 
+    m_pFullyWriteableMemoryRule = new FullyWriteableMemoryRule(m_pProcessor, m_pMemory,
+            m_pVideo, m_pInput, m_pCartridge, m_pAudio);
+
     m_pMemory->SetCurrentRule(m_pRomOnlyMemoryRule);
     m_pMemory->SetIORule(m_pIORegistersMemoryRule);
     m_pMemory->SetCommonRule(m_pCommonMemoryRule);
@@ -883,6 +887,9 @@ bool GearboyCore::AddMemoryRules(Cartridge::CartridgeTypes forceType)
             break;
         case Cartridge::CartridgeMBC5:
             m_pMemory->SetCurrentRule(m_pMBC5MemoryRule);
+            break;
+        case Cartridge::CatridgeFullyWriteable:
+            m_pMemory->SetCurrentRule(m_pFullyWriteableMemoryRule);
             break;
         case Cartridge::CartridgeNotSupported:
             notSupported = true;
