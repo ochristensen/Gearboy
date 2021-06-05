@@ -49,7 +49,7 @@ u8 FullyWriteableMemoryRule::PerformRead(u16 address) {
 }
 
 void FullyWriteableMemoryRule::PerformWrite(u16 address, u8 value) {
-  if (address < 0x2000) {
+  if (address < 0x4000) {
     m_pMemory->Load(address, value);
   } else if (address >= 0xA000 && address < 0xC000) {
     if (m_pCartridge->GetRAMSize() > 0) {
@@ -69,4 +69,4 @@ u8* FullyWriteableMemoryRule::GetRomBank0() {
 
 int FullyWriteableMemoryRule::GetCurrentRomBank0Index() { return 0; }
 
-size_t FullyWriteableMemoryRule::GetDefaultROMSize() const { return 0x2000; }
+size_t FullyWriteableMemoryRule::GetDefaultROMSize() const { return 0x4000; }
