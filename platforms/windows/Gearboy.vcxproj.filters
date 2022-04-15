@@ -320,4 +320,7 @@
       <Filter>desktop-shared</Filter>
     </None>
   </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="Gearboy.manifest" />
+  </ItemGroup>
 </Project>

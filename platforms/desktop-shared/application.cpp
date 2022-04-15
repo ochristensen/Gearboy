@@ -31,6 +31,7 @@
 static SDL_Window* sdl_window;
 static SDL_GLContext gl_context;
 static bool running = true;
+static bool paused_when_focus_lost = false;
 static Uint64 frame_time_start;
 static Uint64 frame_time_end;
 
@@ -53,12 +54,19 @@ int application_init(const char* arg)
     }
 
     int ret = sdl_init();
+
+    application_fullscreen = false;
     
     config_init();
     config_read();
 
-    emu_init(config_root_path);
-    
+    emu_init();
+
+    strcpy(emu_savefiles_path, config_emulator.savefiles_path.c_str());
+    strcpy(emu_savestates_path, config_emulator.savestates_path.c_str());
+    emu_savefiles_dir_option = config_emulator.savefiles_dir_option;
+    emu_savestates_dir_option = config_emulator.savestates_dir_option;
+
     gui_init();
 
     ImGui_ImplSDL2_InitForOpenGL(sdl_window, gl_context);
@@ -103,6 +111,11 @@ void application_trigger_quit(void)
     SDL_Event event;
     event.type = SDL_QUIT;
     SDL_PushEvent(&event);
+}
+
+void application_trigger_fullscreen(bool fullscreen)
+{
+    SDL_SetWindowFullscreen(sdl_window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 }
 
 static int sdl_init(void)
@@ -171,6 +184,8 @@ static int sdl_init(void)
         application_display_scale = (scale_w > scale_h) ? scale_w : scale_h;
     }
 
+    SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
+
     return 0;
 }
 
@@ -209,18 +224,27 @@ static void sdl_events_emu(const SDL_Event* event)
 {
     switch(event->type)
     {
+        case (SDL_DROPFILE):
+        {
+            char* dropped_filedir = event->drop.file;
+            gui_load_rom(dropped_filedir);
+            SDL_free(dropped_filedir);    // Free dropped_filedir memory
+            break;
+        }
         case SDL_WINDOWEVENT:
         {
             switch (event->window.event)
             {
                 case SDL_WINDOWEVENT_FOCUS_GAINED:
                 {
-                    emu_resume();
+                    if (!paused_when_focus_lost)
+                        emu_resume();
                 }
                 break;
 
                 case SDL_WINDOWEVENT_FOCUS_LOST:
                 {
+                    paused_when_focus_lost = emu_is_paused();
                     emu_pause();
                 }
                 break;
@@ -338,6 +362,13 @@ static void sdl_events_emu(const SDL_Event* event)
                 break;
             }
 
+            if (key == SDL_SCANCODE_F11)
+            {
+                application_fullscreen = !application_fullscreen;
+                application_trigger_fullscreen(application_fullscreen);
+                break;
+            }
+
             if (key == config_input.key_left)
                 emu_key_pressed(Left_Key);
             else if (key == config_input.key_right)
@@ -408,6 +439,9 @@ static void sdl_shortcuts_gui(const SDL_Event* event)
             case SDL_SCANCODE_S:
                 gui_shortcut(gui_ShortcutSaveState);
                 break;
+            case SDL_SCANCODE_M:
+                gui_shortcut(gui_ShortcutShowMainMenu);
+                break;
             case SDL_SCANCODE_F5:
                 gui_shortcut(gui_ShortcutDebugContinue);
                 break;
@@ -422,6 +456,9 @@ static void sdl_shortcuts_gui(const SDL_Event* event)
                 break;
             case SDL_SCANCODE_F10:
                 gui_shortcut(gui_ShortcutDebugStep);
+                break;
+            case SDL_SCANCODE_BACKSPACE:
+                gui_shortcut(gui_ShortcutDebugGoBack);
                 break;
         }
     }

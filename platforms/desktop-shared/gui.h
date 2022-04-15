@@ -52,7 +52,9 @@ enum gui_ShortCutEvent
     gui_ShortcutDebugContinue,
     gui_ShortcutDebugNextFrame,
     gui_ShortcutDebugBreakpoint,
-    gui_ShortcutDebugRuntocursor
+    gui_ShortcutDebugRuntocursor,
+    gui_ShortcutDebugGoBack,
+    gui_ShortcutShowMainMenu
 };
 
 EXTERN bool gui_in_use;

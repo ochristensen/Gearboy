@@ -46,6 +46,7 @@ Processor::Processor(Memory* pMemory)
     m_iAccurateOPCodeState = 0;
     m_iReadCache = 0;
     m_bBreakpointHit = false;
+    m_bRequestMemBreakpoint = false;
 
     m_ProcessorState.AF = &AF;
     m_ProcessorState.BC = &BC;
@@ -63,10 +64,10 @@ Processor::~Processor()
 
 void Processor::Init()
 {
-    Reset(false);
+    Reset(false, false);
 }
 
-void Processor::Reset(bool bCGB)
+void Processor::Reset(bool bCGB, bool bGBA)
 {
     m_bCGB = bCGB;
     m_bIME = false;
@@ -82,20 +83,52 @@ void Processor::Reset(bool bCGB)
     m_iSerialBit = 0;
     m_iSerialCycles = 0;
     m_iUnhaltCycles = 0;
-    PC.SetValue(0x100);
-    SP.SetValue(0xFFFE);
-    if (m_bCGB)
-        AF.SetValue(0x11B0);
+
+    if(m_pMemory->IsBootromEnabled())
+    {
+        PC.SetValue(0);
+        SP.SetValue(0);
+        AF.SetValue(0);
+        BC.SetValue(0);
+        DE.SetValue(0);
+        HL.SetValue(0);
+    }
     else
-        AF.SetValue(0x01B0);
-    BC.SetValue(0x0013);
-    DE.SetValue(0x00D8);
-    HL.SetValue(0x014D);
+    {
+        m_pMemory->DisableBootromRegistry();
+        PC.SetValue(0x100);
+        SP.SetValue(0xFFFE);
+
+        if (m_bCGB)
+        {
+            if (bGBA)
+            {
+                AF.SetValue(0x1100);
+                BC.SetValue(0x0100);
+            }
+            else
+            {
+                AF.SetValue(0x1180);
+                BC.SetValue(0x0000);
+            }
+            DE.SetValue(0xFF56);
+            HL.SetValue(0x000D);
+        }
+        else
+        {
+            AF.SetValue(0x01B0);
+            BC.SetValue(0x0013);
+            DE.SetValue(0x00D8);
+            HL.SetValue(0x014D);
+        }
+    }
+
     m_iInterruptDelayCycles = 0;
     m_iAccurateOPCodeState = 0;
     m_iReadCache = 0;
     m_GameSharkList.clear();
     m_bBreakpointHit = false;
+    m_bRequestMemBreakpoint = false;
 }
 
 u8 Processor::RunFor(u8 ticks)
@@ -106,6 +139,7 @@ u8 Processor::RunFor(u8 ticks)
     {
         m_iCurrentClockCycles = 0;
         m_bBreakpointHit = false;
+        m_bRequestMemBreakpoint = false;
 
         if (m_iAccurateOPCodeState == 0 && m_bHalt)
         {
@@ -227,7 +261,8 @@ u8 Processor::RunFor(u8 ticks)
             }
 
             #ifndef GEARBOY_DISABLE_DISASSEMBLER
-            m_bBreakpointHit = Disassemble(PC.GetValue());
+            if (Disassemble(PC.GetValue()) || m_bRequestMemBreakpoint)
+                m_bBreakpointHit = true;
             #endif
         }
 
@@ -447,25 +482,38 @@ bool Processor::Disassemble(u16 address)
         map[offset]->name[0] = 0;
         map[offset]->bytes[0] = 0;
         map[offset]->size = 0;
+        map[offset]->jump = false;
+        map[offset]->jump_address = 0;
+        for (int i = 0; i < 4; i++)
+            map[offset]->opcodes[i] = 0;
     }
 
-    if (map[offset]->size == 0)
+    u8 opcodes[4];
+    bool changed = false;
+
+    for (int i = 0; i < map[offset]->size; i++)
+    {
+        opcodes[i] = m_pMemory->Read(address + i);
+
+        if (opcodes[i] != map[offset]->opcodes[i])
+            changed = true;
+    }
+
+    if ((map[offset]->size == 0) || changed)
     {
         map[offset]->bank = bank;
         map[offset]->address = address;
 
-        u8 bytes[4];
-
         for (int i = 0; i < 4; i++)
-            bytes[i] = m_pMemory->Read(address + i);
+            map[offset]->opcodes[i] = m_pMemory->Read(address + i);
 
-        u8 opcode = bytes[0];
+        u8 opcode = map[offset]->opcodes[0];
         bool cb = false;
 
         if (opcode == 0xCB)
         {
             cb = true;
-            opcode = bytes[1];
+            opcode = map[offset]->opcodes[1];
         }
 
         stOPCodeInfo info = cb ? kOPCodeCBNames[opcode] : kOPCodeNames[opcode];
@@ -479,7 +527,7 @@ bool Processor::Disassemble(u16 address)
             if (i < info.size)
             {
                 char value[8];
-                sprintf(value, "%02X", bytes[i]);
+                sprintf(value, "%02X", map[offset]->opcodes[i]);
                 strcat(map[offset]->bytes, value);
             }
             else
@@ -497,19 +545,23 @@ bool Processor::Disassemble(u16 address)
                 strcpy(map[offset]->name, info.name);
                 break;
             case 1:
-                sprintf(map[offset]->name, info.name, bytes[1]);
+                sprintf(map[offset]->name, info.name, map[offset]->opcodes[1]);
                 break;
             case 2:
-                sprintf(map[offset]->name, info.name, (bytes[2] << 8) | bytes[1]);
+                map[offset]->jump = true;
+                map[offset]->jump_address = (map[offset]->opcodes[2] << 8) | map[offset]->opcodes[1];
+                sprintf(map[offset]->name, info.name, map[offset]->jump_address);
                 break;
             case 3:
-                sprintf(map[offset]->name, info.name, (s8)bytes[1]);
+                sprintf(map[offset]->name, info.name, (s8)map[offset]->opcodes[1]);
                 break;
             case 4:
-                sprintf(map[offset]->name, info.name, address + info.size + (s8)bytes[1], (s8)bytes[1]);
+                map[offset]->jump = true;
+                map[offset]->jump_address = address + info.size + (s8)map[offset]->opcodes[1];
+                sprintf(map[offset]->name, info.name, map[offset]->jump_address, (s8)map[offset]->opcodes[1]);
                 break;
             case 5:
-                sprintf(map[offset]->name, info.name, bytes[1], kRegisterNames[bytes[1]]);
+                sprintf(map[offset]->name, info.name, map[offset]->opcodes[1], kRegisterNames[map[offset]->opcodes[1]]);
                 break;
             default:
                 strcpy(map[offset]->name, "PARSE ERROR");
@@ -517,7 +569,7 @@ bool Processor::Disassemble(u16 address)
     }
 
     Memory::stDisassembleRecord* runtobreakpoint = m_pMemory->GetRunToBreakpoint();
-    std::vector<Memory::stDisassembleRecord*>* breakpoints = m_pMemory->GetBreakpoints();
+    std::vector<Memory::stDisassembleRecord*>* breakpoints = m_pMemory->GetBreakpointsCPU();
 
     if (IsValidPointer(runtobreakpoint))
     {
@@ -531,7 +583,9 @@ bool Processor::Disassemble(u16 address)
     }
     else
     {
-        for (long unsigned int b = 0; b < breakpoints->size(); b++)
+        std::size_t size = breakpoints->size();
+
+        for (std::size_t b = 0; b < size; b++)
         {
             if ((*breakpoints)[b] == map[offset])
             {
@@ -546,6 +600,11 @@ bool Processor::Disassemble(u16 address)
 bool Processor::BreakpointHit()
 {
     return m_bBreakpointHit;
+}
+
+void Processor::RequestMemoryBreakpoint()
+{
+    m_bRequestMemBreakpoint = true;
 }
 
 void Processor::SaveState(std::ostream& stream)

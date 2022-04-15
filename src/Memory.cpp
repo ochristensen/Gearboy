@@ -36,6 +36,8 @@ Memory::Memory()
     InitPointer(m_pCommonMemoryRule);
     InitPointer(m_pIORegistersMemoryRule);
     InitPointer(m_pCurrentMemoryRule);
+    InitPointer(m_pBootromDMG);
+    InitPointer(m_pBootromGBC);
     m_bCGB = false;
     m_iCurrentWRAMBank = 1;
     m_iCurrentLCDRAMBank = 0;
@@ -45,6 +47,11 @@ Memory::Memory()
         m_HDMA[i] = 0;
     m_HDMASource = 0;
     m_HDMADestination = 0;
+    m_bBootromDMGEnabled = false;
+    m_bBootromGBCEnabled = false;
+    m_bBootromRegistryDisabled = false;
+    m_bBootromDMGLoaded = false;
+    m_bBootromGBCLoaded = false;
 }
 
 Memory::~Memory()
@@ -57,6 +64,8 @@ Memory::~Memory()
     InitPointer(m_pCommonMemoryRule);
     InitPointer(m_pIORegistersMemoryRule);
     InitPointer(m_pCurrentMemoryRule);
+    SafeDeleteArray(m_pBootromDMG);
+    SafeDeleteArray(m_pBootromGBC);
 
     if (IsValidPointer(m_pDisassembledROMMap))
     {
@@ -92,9 +101,11 @@ void Memory::Init()
     m_pMap = new u8[65536];
     m_pWRAMBanks = new u8[0x8000];
     m_pLCDRAMBank1 = new u8[0x2000];
+    m_pBootromDMG = new u8[0x100];
+    m_pBootromGBC = new u8[0x900];
 #ifndef GEARBOY_DISABLE_DISASSEMBLER
     m_pDisassembledMap = new stDisassembleRecord*[65536];
-    for (int i = 0; i < 0x10000; i++)
+    for (int i = 0; i < 65536; i++)
     {
         InitPointer(m_pDisassembledMap[i]);
     }
@@ -105,7 +116,8 @@ void Memory::Init()
         InitPointer(m_pDisassembledROMMap[i]);
     }
 #endif
-    m_Breakpoints.clear();
+    m_BreakpointsCPU.clear();
+    m_BreakpointsMem.clear();
     InitPointer(m_pRunToBreakpoint);
     Reset(false);
 }
@@ -120,21 +132,13 @@ void Memory::Reset(bool bCGB)
     m_iCurrentLCDRAMBank = 0;
     m_bHDMAEnabled = false;
     m_iHDMABytes = 0;
+    m_bBootromRegistryDisabled = false;
 
-    if (IsValidPointer(m_pDisassembledROMMap))
-    {
-        for (int i = 0; i < MAX_ROM_SIZE; i++)
-        {
-            SafeDelete(m_pDisassembledROMMap[i]);
-        }
-    }
+    if (IsBootromEnabled())
+        ResetBootromDisassembledMemory();
 
     for (int i = 0; i < 65536; i++)
     {
-        if (IsValidPointer(m_pDisassembledMap))
-        {
-            SafeDelete(m_pDisassembledMap[i]);
-        }
         m_pMap[i] = 0x00;
 
         if ((i >= 0x8000) && (i < 0xA000))
@@ -545,9 +549,14 @@ u8* Memory::GetWRAM1()
     return m_bCGB ? m_pWRAMBanks + (0x1000 * m_iCurrentWRAMBank) : m_pMap + 0xD000;
 }
 
-std::vector<Memory::stDisassembleRecord*>* Memory::GetBreakpoints()
+std::vector<Memory::stDisassembleRecord*>* Memory::GetBreakpointsCPU()
 {
-    return &m_Breakpoints;
+    return &m_BreakpointsCPU;
+}
+
+std::vector<Memory::stMemoryBreakpoint>* Memory::GetBreakpointsMem()
+{
+    return &m_BreakpointsMem;
 }
 
 Memory::stDisassembleRecord* Memory::GetRunToBreakpoint()
@@ -560,3 +569,169 @@ void Memory::SetRunToBreakpoint(Memory::stDisassembleRecord* pBreakpoint)
     m_pRunToBreakpoint = pBreakpoint;
 }
 
+void Memory::EnableBootromDMG(bool enable)
+{
+    m_bBootromDMGEnabled = enable;
+
+    if (m_bBootromDMGEnabled)
+    {
+        Log("DMG Bootrom enabled");
+    }
+    else
+    {
+        Log("DMG Bootrom disabled");
+    }
+}
+
+void Memory::EnableBootromGBC(bool enable)
+{
+    m_bBootromGBCEnabled = enable;
+
+    if (m_bBootromGBCEnabled)
+    {
+        Log("GBC Bootrom enabled");
+    }
+    else
+    {
+        Log("GBC Bootrom disabled");
+    }
+}
+
+void Memory::LoadBootromDMG(const char* szFilePath)
+{
+    Log("Loading DMG Bootrom %s...", szFilePath);
+
+    LoadBootroom(szFilePath, false);
+}
+
+void Memory::LoadBootromGBC(const char* szFilePath)
+{
+    Log("Loading GBC Bootrom %s...", szFilePath);
+
+    LoadBootroom(szFilePath, true);
+}
+
+bool Memory::IsBootromEnabled()
+{
+    return (m_bBootromDMGEnabled && m_bBootromDMGLoaded && !m_bCGB) || (m_bBootromGBCEnabled && m_bBootromGBCLoaded && m_bCGB);
+}
+
+void Memory::DisableBootromRegistry()
+{
+    if (!m_bBootromRegistryDisabled && IsBootromEnabled())
+    {
+        ResetBootromDisassembledMemory();
+    }
+
+    m_bBootromRegistryDisabled = true;
+}
+
+bool Memory::IsBootromRegistryEnabled()
+{
+    return !m_bBootromRegistryDisabled;
+}
+
+void Memory::ResetDisassembledMemory()
+{
+    #ifndef GEARBOY_DISABLE_DISASSEMBLER
+
+    if (IsValidPointer(m_pDisassembledROMMap))
+    {
+        for (int i = 0; i < MAX_ROM_SIZE; i++)
+        {
+            SafeDelete(m_pDisassembledROMMap[i]);
+        }
+    }
+    if (IsValidPointer(m_pDisassembledMap))
+    {
+        for (int i = 0; i < 65536; i++)
+        {
+            SafeDelete(m_pDisassembledMap[i]);
+        }
+    }
+
+    #endif
+}
+
+void Memory::ResetBootromDisassembledMemory()
+{
+    #ifndef GEARBOY_DISABLE_DISASSEMBLER
+
+    m_BreakpointsCPU.clear();
+
+    if (IsValidPointer(m_pDisassembledROMMap))
+    {
+        for (int i = 0; i < 0x0100; i++)
+        {
+            SafeDelete(m_pDisassembledROMMap[i]);
+        }
+    }
+    if (IsValidPointer(m_pDisassembledMap))
+    {
+        for (int i = 0; i < 0x0100; i++)
+        {
+            SafeDelete(m_pDisassembledMap[i]);
+        }
+    }
+
+    if (m_bCGB)
+    {
+        if (IsValidPointer(m_pDisassembledROMMap))
+        {
+            for (int i = 0x0200; i < 0x0900; i++)
+            {
+                SafeDelete(m_pDisassembledROMMap[i]);
+            }
+        }
+        if (IsValidPointer(m_pDisassembledMap))
+        {
+            for (int i = 0x0200; i < 0x0900; i++)
+            {
+                SafeDelete(m_pDisassembledMap[i]);
+            }
+        }
+    }
+
+    #endif
+}
+
+void Memory::LoadBootroom(const char* szFilePath, bool gbc)
+{
+    using namespace std;
+
+    int expectedSize = gbc ? 0x900 : 0x100;
+    u8* bootrom = gbc ? m_pBootromGBC : m_pBootromDMG;
+
+    ifstream file(szFilePath, ios::in | ios::binary | ios::ate);
+
+    bool ret = false;
+
+    if (file.is_open())
+    {
+        int size = static_cast<int> (file.tellg());
+
+        if (size == expectedSize)
+        {
+            file.seekg(0, ios::beg);
+            file.read(reinterpret_cast<char*>(bootrom), size);
+            file.close();
+
+            ret = true;
+
+            Log("Bootrom %s loaded", szFilePath);
+        }
+        else
+        {
+            Log("Incompatible bootrom size (expected 0x%X): 0x%X", expectedSize, size);
+        }
+    }
+    else
+    {
+        Log("There was a problem opening the file %s", szFilePath);
+    }
+
+    if (gbc)
+        m_bBootromGBCLoaded = ret;
+    else
+        m_bBootromDMGLoaded = ret;
+}

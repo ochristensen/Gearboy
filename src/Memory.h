@@ -39,6 +39,18 @@ public:
         char bytes[16];
         int size;
         int bank;
+        u8 opcodes[4];
+        bool jump;
+        u16 jump_address;
+    };
+
+    struct stMemoryBreakpoint
+    {
+        u16 address1;
+        u16 address2;
+        bool read;
+        bool write;
+        bool range;
     };
 
 public:
@@ -85,9 +97,23 @@ public:
     u8* GetRAM();
     u8* GetWRAM0();
     u8* GetWRAM1();
-    std::vector<stDisassembleRecord*>* GetBreakpoints();
+    std::vector<stDisassembleRecord*>* GetBreakpointsCPU();
+    std::vector<stMemoryBreakpoint>* GetBreakpointsMem();
     stDisassembleRecord* GetRunToBreakpoint();
     void SetRunToBreakpoint(stDisassembleRecord* pBreakpoint);
+    void EnableBootromDMG(bool enable);
+    void EnableBootromGBC(bool enable);
+    void LoadBootromDMG(const char* szFilePath);
+    void LoadBootromGBC(const char* szFilePath);
+    bool IsBootromEnabled();
+    void DisableBootromRegistry();
+    bool IsBootromRegistryEnabled();
+    void ResetDisassembledMemory();
+    void ResetBootromDisassembledMemory();
+
+private:
+    void LoadBootroom(const char* szFilePath, bool gbc);
+    void CheckBreakpoints(u16 address, bool write);
 
 private:
     Processor* m_pProcessor;
@@ -98,7 +124,8 @@ private:
     u8* m_pMap;
     stDisassembleRecord** m_pDisassembledMap;
     stDisassembleRecord** m_pDisassembledROMMap;
-    std::vector<stDisassembleRecord*> m_Breakpoints;
+    std::vector<stDisassembleRecord*> m_BreakpointsCPU;
+    std::vector<stMemoryBreakpoint> m_BreakpointsMem;
     stDisassembleRecord* m_pRunToBreakpoint;
     bool m_bCGB;
     int m_iCurrentWRAMBank;
@@ -110,6 +137,13 @@ private:
     u8 m_HDMA[5];
     u16 m_HDMASource;
     u16 m_HDMADestination;
+    bool m_bBootromDMGEnabled;
+    bool m_bBootromGBCEnabled;
+    bool m_bBootromDMGLoaded;
+    bool m_bBootromGBCLoaded;
+    u8* m_pBootromDMG;
+    u8* m_pBootromGBC;
+    bool m_bBootromRegistryDisabled;
 };
 
 #include "Memory_inline.h"

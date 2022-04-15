@@ -2,26 +2,26 @@
 
 [![Gearboy CI](https://github.com/drhelius/Gearboy/workflows/Gearboy%20CI/badge.svg)](https://github.com/drhelius/Gearboy/actions)
 
-Gearboy is a cross-platform Game Boy / GameBoy Color emulator written in C++ that runs on Windows, macOS, Linux, iOS, Raspberry Pi and RetroArch.
+Gearboy is a cross-platform Game Boy / Game Boy Color emulator written in C++ that runs on Windows, macOS, Linux, BSD, iOS, Raspberry Pi and RetroArch.
 
 This is an open source project with its ongoing development made possible thanks to the support by these awesome [backers](backers.md).
 
 Please, consider [sponsoring](https://github.com/sponsors/drhelius) and following me on [Twitter](https://twitter.com/drhelius) for updates.
 
+If you find a bug or want new features, you can help me [openning an issue](https://github.com/drhelius/Gearboy/issues). 
+
 ----------
 
 ## Downloads
 
-- **Windows**: [Gearboy-3.3.0-Windows.zip](https://github.com/drhelius/Gearboy/releases/download/gearboy-3.3.0/Gearboy-3.3.0-Windows.zip)
+- **Windows**: [Gearboy-3.4.0-Windows.zip](https://github.com/drhelius/Gearboy/releases/download/gearboy-3.4.0/Gearboy-3.4.0-Windows.zip)
   + NOTE: You may need to install the [Microsoft Visual C++ Redistributable](https://go.microsoft.com/fwlink/?LinkId=746572)
 - **macOS**:
   + `brew install --cask gearboy`
-  + Or install manually: [Gearboy-3.3.0-macOS.zip](https://github.com/drhelius/Gearboy/releases/download/gearboy-3.3.0/Gearboy-3.3.0-macOS.zip)
-- **Linux**: [Gearboy-3.3.0-Linux.tar.xz](https://github.com/drhelius/Gearboy/releases/download/gearboy-3.3.0/Gearboy-3.3.0-Linux.tar.xz)
+  + Or install manually: [Gearboy-3.4.0-macOS.zip](https://github.com/drhelius/Gearboy/releases/download/gearboy-3.4.0/Gearboy-3.4.0-macOS.zip)
+- **Linux**: [Gearboy-3.4.0-Linux.tar.xz](https://github.com/drhelius/Gearboy/releases/download/gearboy-3.4.0/Gearboy-3.4.0-Linux.tar.xz)
   + NOTE: You may need to install `libsdl2` and `libglew`
-- **iOS**: Build Gearboy with Xcode and transfer it to your device. You can open rom files from other apps like Safari or Dropbox, or use your iCloud Drive.
-- **RetroArch**: [Libretro core documentation](https://libretro.readthedocs.io/en/latest/library/gearboy/).
-- **Raspberry Pi**: Build Gearboy from sources. Optimized projects are provided for Raspberry Pi 1, 2, 3 and 4.
+- **RetroArch**: [Libretro core documentation](https://docs.libretro.com/library/gearboy/).
 
 ## Features
 
@@ -32,15 +32,17 @@ Please, consider [sponsoring](https://github.com/sponsors/drhelius) and followin
 - Game Boy Color support.
 - LCD screen ghosting effect as seen in the original Game Boy.
 - LCD dot matrix effect.
-- Sound emulation using SDL Audio and [Gb_Snd_Emu library](http://blargg.8bitalley.com/libs/audio.html#Gb_Snd_Emu).
-- Save battery powered RAM cartridges to file.
+- Sound emulation using SDL Audio and [Gb_Snd_Emu library](https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu).
+- Battery powered RAM save support.
 - Save states.
 - Compressed rom support (ZIP).
+- Bootrom (bios) support.
 - *Game Genie* and *GameShark* cheat support.
-- Supported platforms (standalone): Windows, Linux, macOS, Raspberry Pi and iOS.
-- Supported platforms (libretro): Windows, Linux, macOS, Raspberry Pi, Android, iOS, tvOS, PlayStation Vita, PlayStation 3, Nintendo 3DS, Nintendo GameCube, Nintendo Wii, Nintendo WiiU, Nintendo Switch Emscripten, Classic Mini systemts (NES, SNES, C64 ...) and QNX.
-- Full debugger with disassembler, breakpoints, debug symbols, memory editor, IO inspector and VRAM viewer including tiles, sprites, backgrounds and palettes.
+- Supported platforms (standalone): Windows, Linux, BSD, macOS, Raspberry Pi and iOS.
+- Supported platforms (libretro): Windows, Linux, macOS, Raspberry Pi, Android, iOS, tvOS, PlayStation Vita, PlayStation 3, Nintendo 3DS, Nintendo GameCube, Nintendo Wii, Nintendo WiiU, Nintendo Switch, Emscripten, Classic Mini systems (NES, SNES, C64, ...), OpenDingux, RetroFW and QNX.
+- Full debugger with just-in-time disassembler, cpu breakpoints, memory access breakpoints, code navigation (goto address, JP JR and CALL double clicking), debug symbols, memory editor, IO inspector and VRAM viewer including tiles, sprites, backgrounds and palettes.
 - Windows and Linux *Portable Mode* by creating a file named `portable.ini` in the same directory as the application binary.
+- Support for modern game controllers through [gamecontrollerdb.txt](https://github.com/gabomdq/SDL_GameControllerDB) file located in the same directory as the application binary.
 
 <img src="http://www.geardome.com/files/gearboy/gearboy_debug_01.png" width="880" height="455">
 
@@ -79,6 +81,16 @@ make
 sudo dnf install @development-tools gcc-c++ SDL2-devel glew-devel
 cd platforms/linux
 make
+```
+
+### BSD
+
+- NetBSD:
+
+``` shell
+su root -c "pkgin install gmake pkgconf SDL2 glew"
+cd platforms/bsd
+gmake
 ```
 
 ### iOS

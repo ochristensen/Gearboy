@@ -55,7 +55,7 @@ public:
     Processor(Memory* pMemory);
     ~Processor();
     void Init();
-    void Reset(bool bCGB);
+    void Reset(bool bCGB, bool bGBA);
     u8 RunFor(u8 ticks);
     void RequestInterrupt(Interrupts interrupt);
     void ResetTIMACycles();
@@ -72,6 +72,7 @@ public:
     ProcessorState* GetState();
     bool Disassemble(u16 address);
     bool BreakpointHit();
+    void RequestMemoryBreakpoint();
     void UpdateTimers(u8 ticks);
     void UpdateSerial(u8 ticks);
 
@@ -104,6 +105,7 @@ private:
     int m_iAccurateOPCodeState;
     u8 m_iReadCache;
     bool m_bBreakpointHit;
+    bool m_bRequestMemBreakpoint;
 
     struct GameSharkCode
     {        

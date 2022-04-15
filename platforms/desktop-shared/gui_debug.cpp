@@ -17,6 +17,7 @@
  *
  */
 
+#include <math.h>
 #include "imgui/imgui.h"
 #include "imgui/imgui_memory_editor.h"
 #include "FileBrowser/ImGuiFileBrowser.h"
@@ -56,7 +57,15 @@ static ImVec4 gray = ImVec4(0.5f,0.5f,0.5f,1.0f);
 static ImVec4 dark_gray = ImVec4(0.1f,0.1f,0.1f,1.0f);
 static std::vector<DebugSymbol> symbols;
 static Memory::stDisassembleRecord* selected_record = NULL;
-static char brk_address[8] = "";
+static char brk_address_cpu[8] = "";
+static char brk_address_mem[10] = "";
+static bool brk_new_mem_read = true;
+static bool brk_new_mem_write = true;
+static char goto_address[5] = "";
+static bool goto_address_requested = false;
+static u16 goto_address_target = 0;
+static bool goto_back_requested = false;
+static int goto_back = 0;
 
 static void debug_window_processor(void);
 static void debug_window_io(void);
@@ -69,7 +78,9 @@ static void debug_window_vram_tiles(void);
 static void debug_window_vram_oam(void);
 static void debug_window_vram_palettes(void);
 static void add_symbol(const char* line);
-static void add_breakpoint(void);
+static void add_breakpoint_cpu(void);
+static void add_breakpoint_mem(void);
+static void request_goto_address(u16 addr);
 static ImVec4 color_565_to_float(u16 color);
 
 void gui_debug_windows(void)
@@ -96,7 +107,8 @@ void gui_debug_windows(void)
 
 void gui_debug_reset(void)
 {
-    gui_debug_reset_breakpoints();
+    gui_debug_reset_breakpoints_cpu();
+    gui_debug_reset_breakpoints_mem();
     gui_debug_reset_symbols();
     selected_record = NULL;
 }
@@ -133,7 +145,7 @@ void gui_debug_toggle_breakpoint(void)
     if (IsValidPointer(selected_record))
     {
         bool found = false;
-        std::vector<Memory::stDisassembleRecord*>* breakpoints = emu_get_core()->GetMemory()->GetBreakpoints();
+        std::vector<Memory::stDisassembleRecord*>* breakpoints = emu_get_core()->GetMemory()->GetBreakpointsCPU();
 
         for (long unsigned int b = 0; b < breakpoints->size(); b++)
         {
@@ -161,10 +173,21 @@ void gui_debug_runtocursor(void)
     }
 }
 
-void gui_debug_reset_breakpoints(void)
+void gui_debug_reset_breakpoints_cpu(void)
 {
-    emu_get_core()->GetMemory()->GetBreakpoints()->clear();
-    brk_address[0] = 0;
+    emu_get_core()->GetMemory()->GetBreakpointsCPU()->clear();
+    brk_address_cpu[0] = 0;
+}
+
+void gui_debug_reset_breakpoints_mem(void)
+{
+    emu_get_core()->GetMemory()->GetBreakpointsMem()->clear();
+    brk_address_mem[0] = 0;
+}
+
+void gui_debug_go_back(void)
+{
+    goto_back_requested = true;
 }
 
 static void debug_window_memory(void)
@@ -294,20 +317,13 @@ static void debug_window_disassembler(void)
     Processor* processor = core->GetProcessor();
     Processor::ProcessorState* proc_state = processor->GetState();
     Memory* memory = core->GetMemory();
-    std::vector<Memory::stDisassembleRecord*>* breakpoints = memory->GetBreakpoints();
-    Memory::stDisassembleRecord** memoryMap = memory->GetDisassembledMemoryMap();
-    Memory::stDisassembleRecord** romMap = memory->GetDisassembledROMMemoryMap();
+    std::vector<Memory::stDisassembleRecord*>* breakpoints_cpu = memory->GetBreakpointsCPU();
+    std::vector<Memory::stMemoryBreakpoint>* breakpoints_mem = memory->GetBreakpointsMem();
+    Memory::stDisassembleRecord** memory_map = memory->GetDisassembledMemoryMap();
+    Memory::stDisassembleRecord** rom_map = memory->GetDisassembledROMMemoryMap();
     Memory::stDisassembleRecord** map = NULL;
 
     int pc = proc_state->PC->GetValue();
-
-    static bool follow_pc = true;
-    static bool show_mem = true;
-    static bool show_symbols = true;
-
-    ImGui::Checkbox("Follow PC", &follow_pc); ImGui::SameLine();
-    ImGui::Checkbox("Show Memory", &show_mem);  ImGui::SameLine();
-    ImGui::Checkbox("Show Symbols", &show_symbols);
 
     if (ImGui::Button("Step Over"))
         emu_debug_step();
@@ -321,48 +337,101 @@ static void debug_window_disassembler(void)
     if (ImGui::Button("Run To Cursor"))
         gui_debug_runtocursor();
 
-    if (ImGui::CollapsingHeader("Breakpoints"))
-    {
-        ImGui::Checkbox("Disable All", &emu_debug_disable_breakpoints);
+    static bool follow_pc = true;
+    static bool show_mem = true;
+    static bool show_symbols = true;
 
-        ImGui::Columns(2, "breakpoints");
+    ImGui::Checkbox("Follow PC", &follow_pc); ImGui::SameLine();
+    ImGui::Checkbox("Show Memory", &show_mem);  ImGui::SameLine();
+    ImGui::Checkbox("Show Symbols", &show_symbols);
+
+    ImGui::Separator();
+
+    ImGui::Text("Go To Address: ");
+    ImGui::SameLine();
+    ImGui::PushItemWidth(45);
+    if (ImGui::InputTextWithHint("##goto_address", "XXXX", goto_address, IM_ARRAYSIZE(goto_address), ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue))
+    {
+        try
+        {
+            request_goto_address((u16)std::stoul(goto_address, 0, 16));
+            follow_pc = false;
+        }
+        catch(const std::invalid_argument&)
+        {
+        }
+        goto_address[0] = 0;
+    }
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    if (ImGui::Button("Go", ImVec2(30, 0)))
+    {
+        try
+        {
+            request_goto_address((u16)std::stoul(goto_address, 0, 16));
+            follow_pc = false;
+        }
+        catch(const std::invalid_argument&)
+        {
+        }
+        goto_address[0] = 0;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Back", ImVec2(50, 0)))
+    {
+        goto_back_requested = true;
+        follow_pc = false;
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::CollapsingHeader("Processor Breakpoints"))
+    {
+        ImGui::Checkbox("Disable All##disable_all_cpu", &emu_debug_disable_breakpoints_cpu);
+
+        ImGui::Columns(2, "breakpoints_cpu");
         ImGui::SetColumnOffset(1, 85);
 
         ImGui::Separator();
 
         if (IsValidPointer(selected_record))
-            sprintf(brk_address, "%02X:%04X", selected_record->bank, selected_record->address);
+            sprintf(brk_address_cpu, "%02X:%04X", selected_record->bank, selected_record->address);
         
         ImGui::PushItemWidth(70);
-        if (ImGui::InputTextWithHint("##add_breakpoint", "XX:XXXX", brk_address, IM_ARRAYSIZE(brk_address), ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue))
+        if (ImGui::InputTextWithHint("##add_breakpoint_cpu", "XX:XXXX", brk_address_cpu, IM_ARRAYSIZE(brk_address_cpu), ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue))
         {
-            add_breakpoint();
+            add_breakpoint_cpu();
         }
         ImGui::PopItemWidth();
+
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Use XXXX format for addresses in bank 0 or XX:XXXX for selecting bank and address");
         
-        if (ImGui::Button("Add", ImVec2(70, 0)))
+        if (ImGui::Button("Add##add_cpu", ImVec2(70, 0)))
         {
-            add_breakpoint();
+            add_breakpoint_cpu();
         }
         
-        if (ImGui::Button("Clear All", ImVec2(70, 0)))
+        if (ImGui::Button("Clear All##clear_all_cpu", ImVec2(70, 0)))
         {
-            gui_debug_reset_breakpoints();
+            gui_debug_reset_breakpoints_cpu();
         }
 
         ImGui::NextColumn();
 
-        ImGui::BeginChild("breakpoints", ImVec2(0, 74), false);
+        ImGui::BeginChild("breakpoints_cpu", ImVec2(0, 80), false);
 
-        for (long unsigned int b = 0; b < breakpoints->size(); b++)
+        int remove = -1;
+
+        for (long unsigned int b = 0; b < breakpoints_cpu->size(); b++)
         {
-            if (!IsValidPointer((*breakpoints)[b]))
+            if (!IsValidPointer((*breakpoints_cpu)[b]))
                 continue;
 
             ImGui::PushID(b);
             if (ImGui::SmallButton("X"))
             {
-               InitPointer((*breakpoints)[b]);
+               remove = b;
                ImGui::PopID();
                continue;
             }
@@ -371,10 +440,92 @@ static void debug_window_disassembler(void)
 
             ImGui::PushFont(gui_default_font);
             ImGui::SameLine();
-            ImGui::TextColored(red, "%02X:%04X", (*breakpoints)[b]->bank, (*breakpoints)[b]->address);
+            ImGui::TextColored(red, "%02X:%04X", (*breakpoints_cpu)[b]->bank, (*breakpoints_cpu)[b]->address);
             ImGui::SameLine();
-            ImGui::TextColored(gray, "%s", (*breakpoints)[b]->name);
+            ImGui::TextColored(gray, "%s", (*breakpoints_cpu)[b]->name);
             ImGui::PopFont();
+        }
+
+        if (remove >= 0)
+        {
+            breakpoints_cpu->erase(breakpoints_cpu->begin() + remove);
+        }
+
+        ImGui::EndChild();
+        ImGui::Columns(1);
+        ImGui::Separator();
+    }
+
+    if (ImGui::CollapsingHeader("Memory Breakpoints"))
+    {
+        ImGui::Checkbox("Disable All##diable_all_mem", &emu_debug_disable_breakpoints_mem);
+
+        ImGui::Columns(2, "breakpoints_mem");
+        ImGui::SetColumnOffset(1, 100);
+
+        ImGui::Separator();
+
+        ImGui::PushItemWidth(85);
+        if (ImGui::InputTextWithHint("##add_breakpoint_mem", "XXXX-XXXX", brk_address_mem, IM_ARRAYSIZE(brk_address_mem), ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            add_breakpoint_mem();
+        }
+        ImGui::PopItemWidth();
+
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Use XXXX format for single addresses or XXXX-XXXX for address ranges");
+
+        ImGui::Checkbox("Read", &brk_new_mem_read);
+        ImGui::Checkbox("Write", &brk_new_mem_write);
+
+        if (ImGui::Button("Add##add_mem", ImVec2(85, 0)))
+        {
+            add_breakpoint_mem();
+        }
+
+        if (ImGui::Button("Clear All##clear_all_mem", ImVec2(85, 0)))
+        {
+            gui_debug_reset_breakpoints_mem();
+        }
+
+        ImGui::NextColumn();
+
+        ImGui::BeginChild("breakpoints_mem", ImVec2(0, 130), false);
+
+        int remove = -1;
+
+        for (long unsigned int b = 0; b < breakpoints_mem->size(); b++)
+        {
+            ImGui::PushID(10000 + b);
+            if (ImGui::SmallButton("X"))
+            {
+               remove = b;
+               ImGui::PopID();
+               continue;
+            }
+
+            ImGui::PopID();
+
+            ImGui::PushFont(gui_default_font);
+            ImGui::SameLine();
+            if ((*breakpoints_mem)[b].range)
+                ImGui::TextColored(red, "%04X-%04X", (*breakpoints_mem)[b].address1, (*breakpoints_mem)[b].address2);
+            else
+                ImGui::TextColored(red, "%04X", (*breakpoints_mem)[b].address1);
+            if ((*breakpoints_mem)[b].read)
+            {
+                ImGui::SameLine(); ImGui::TextColored(gray, "R");
+            }
+            if ((*breakpoints_mem)[b].write)
+            {
+                ImGui::SameLine(); ImGui::TextColored(gray, "W");
+            }
+            ImGui::PopFont();
+        }
+
+        if (remove >= 0)
+        {
+            breakpoints_mem->erase(breakpoints_mem->begin() + remove);
         }
 
         ImGui::EndChild();
@@ -390,6 +541,7 @@ static void debug_window_disassembler(void)
     {
         int dis_size = 0;
         int pc_pos = 0;
+        int goto_address_pos = 0;
         
         std::vector<DisassmeblerLine> vec(0x10000);
         
@@ -402,17 +554,17 @@ static void debug_window_disassembler(void)
             {
                 bank = memory->GetCurrentRule()->GetCurrentRomBank0Index();
                 offset = (0x4000 * bank) + i;
-                map = romMap;
+                map = rom_map;
             }
             else if ((i & 0xC000) == 0x4000)
             {
                 bank = memory->GetCurrentRule()->GetCurrentRomBank1Index();
                 offset = (0x4000 * bank) + (i & 0x3FFF);
-                map = romMap;
+                map = rom_map;
             }
             else
             {
-                map = memoryMap;
+                map = memory_map;
             }
 
             if (IsValidPointer(map[offset]) && map[offset]->name[0] != 0)
@@ -432,12 +584,15 @@ static void debug_window_disassembler(void)
 
                 if (vec[dis_size].record->address == pc)
                     pc_pos = dis_size;
+                
+                if (goto_address_requested && (vec[dis_size].record->address <= goto_address_target))
+                    goto_address_pos = dis_size;
 
                 vec[dis_size].is_breakpoint = false;
 
-                for (long unsigned int b = 0; b < breakpoints->size(); b++)
+                for (long unsigned int b = 0; b < breakpoints_cpu->size(); b++)
                 {
-                    if ((*breakpoints)[b] == vec[dis_size].record)
+                    if ((*breakpoints_cpu)[b] == vec[dis_size].record)
                     {
                         vec[dis_size].is_breakpoint = true;
                         break;
@@ -453,6 +608,19 @@ static void debug_window_disassembler(void)
             float window_offset = ImGui::GetWindowHeight() / 2.0f;
             float offset = window_offset - (ImGui::GetTextLineHeightWithSpacing() - 2.0f);
             ImGui::SetScrollY((pc_pos * ImGui::GetTextLineHeightWithSpacing()) - offset);
+        }
+
+        if (goto_address_requested)
+        {
+            goto_address_requested = false;
+            goto_back = (int)ImGui::GetScrollY();
+            ImGui::SetScrollY((goto_address_pos * ImGui::GetTextLineHeightWithSpacing()) + 2);
+        }
+
+        if (goto_back_requested)
+        {
+            goto_back_requested = false;
+            ImGui::SetScrollY((float)goto_back);
         }
 
         ImGuiListClipper clipper(dis_size, ImGui::GetTextLineHeightWithSpacing());
@@ -471,12 +639,17 @@ static void debug_window_disassembler(void)
 
                 bool is_selected = (selected_record == vec[item].record);
 
-                if (ImGui::Selectable("", is_selected))
+                if (ImGui::Selectable("", is_selected, ImGuiSelectableFlags_AllowDoubleClick))
                 {
-                    if (is_selected)
+                    if (ImGui::IsMouseDoubleClicked(0) && vec[item].record->jump)
+                    {
+                        follow_pc = false;
+                        request_goto_address(vec[item].record->jump_address);
+                    }
+                    else if (is_selected)
                     {
                         InitPointer(selected_record);
-                        brk_address[0] = 0;
+                        brk_address_cpu[0] = 0;
                     }
                     else
                         selected_record = vec[item].record;
@@ -552,6 +725,7 @@ static void debug_window_processor(void)
     GearboyCore* core = emu_get_core();
     Processor* processor = core->GetProcessor();
     Processor::ProcessorState* proc_state = processor->GetState();
+    Memory* memory = core->GetMemory();
 
     ImGui::Separator();
 
@@ -645,6 +819,11 @@ static void debug_window_processor(void)
 
     ImGui::TextColored(cyan, " DOUBLE SPEED "); ImGui::SameLine();
     processor->CGBSpeed() ? ImGui::TextColored(green, "ON") : ImGui::TextColored(gray, "OFF");
+
+    ImGui::Separator();
+
+    ImGui::TextColored(cyan, "   BOOTROM "); ImGui::SameLine();
+    memory->IsBootromRegistryEnabled() ? ImGui::TextColored(green, "ON") : ImGui::TextColored(gray, "OFF");
 
     ImGui::PopFont();
 
@@ -1143,8 +1322,8 @@ static void debug_window_vram_background(void)
     int tile_y = -1;
     if ((mouse_x >= 0.0f) && (mouse_x < size) && (mouse_y >= 0.0f) && (mouse_y < size))
     {
-        tile_x = mouse_x / spacing;
-        tile_y = mouse_y / spacing;
+        tile_x = (int)(mouse_x / spacing);
+        tile_y = (int)(mouse_y / spacing);
 
         draw_list->AddRect(ImVec2(p.x + (tile_x * spacing), p.y + (tile_y * spacing)), ImVec2(p.x + ((tile_x + 1) * spacing), p.y + ((tile_y + 1) * spacing)), ImColor(cyan), 2.0f, 15, 2.0f);
 
@@ -1328,8 +1507,8 @@ static void debug_window_vram_tiles(void)
 
         if ((mouse_x >= 0.0f) && (mouse_x < width) && (mouse_y >= 0.0f) && (mouse_y < height))
         {
-            tile_x = mouse_x / spacing;
-            tile_y = mouse_y / spacing;
+            tile_x = (int)(mouse_x / spacing);
+            tile_y = (int)(mouse_y / spacing);
 
             draw_list->AddRect(ImVec2(p[i].x + (tile_x * spacing), p[i].y + (tile_y * spacing)), ImVec2(p[i].x + ((tile_x + 1) * spacing), p[i].y + ((tile_y + 1) * spacing)), ImColor(cyan), 2.0f, 15, 2.0f);
 
@@ -1411,6 +1590,9 @@ static void debug_window_vram_oam(void)
 
     for (int s = 0; s < 40; s++)
     {
+        if ((p[s].x == 0) && (p[s].y == 0))
+            continue;
+
         float mouse_x = io.MousePos.x - p[s].x;
         float mouse_y = io.MousePos.y - p[s].y;
 
@@ -1670,48 +1852,60 @@ static void add_symbol(const char* line)
 
         std::size_t separator = str.find(":");
 
-        if (separator != std::string::npos)
+        try
         {
-            s.address = std::stoul(str.substr(separator + 1 , std::string::npos), 0, 16);
+            if (separator != std::string::npos)
+            {
+                s.address = (u16)std::stoul(str.substr(separator + 1 , std::string::npos), 0, 16);
+                s.bank = std::stoul(str.substr(0, separator), 0 , 16);
+            }
+            else
+            {
+                s.address = (u16)std::stoul(str, 0, 16);
+                s.bank = 0;
+            }
 
-            s.bank = std::stoul(str.substr(0, separator), 0 , 16);
+            symbols.push_back(s);
         }
-        else
+        catch(const std::invalid_argument&)
         {
-            s.address = std::stoul(str, 0, 16);
-            s.bank = 0;
         }
-
-        symbols.push_back(s);
     }
 }
 
-static void add_breakpoint(void)
+static void add_breakpoint_cpu(void)
 {
-    int input_len = strlen(brk_address);
+    int input_len = (int)strlen(brk_address_cpu);
     u16 target_address = 0;
     int target_bank = 0;
     int target_offset = 0;
 
-    if ((input_len == 7) && (brk_address[2] == ':'))
+    try
     {
-        std::string str(brk_address);   
-        std::size_t separator = str.find(":");
-
-        if (separator != std::string::npos)
+        if ((input_len == 7) && (brk_address_cpu[2] == ':'))
         {
-            target_address = std::stoul(str.substr(separator + 1 , std::string::npos), 0, 16);
+            std::string str(brk_address_cpu);
+            std::size_t separator = str.find(":");
 
-            target_bank = std::stoul(str.substr(0, separator), 0 , 16);
-            target_bank &= 0xFF;
+            if (separator != std::string::npos)
+            {
+                target_address = (u16)std::stoul(str.substr(separator + 1 , std::string::npos), 0, 16);
+
+                target_bank = std::stoul(str.substr(0, separator), 0 , 16);
+                target_bank &= 0xFF;
+            }
         }
-    } 
-    else if (input_len == 4)
-    {
-        target_bank = 0; 
-        target_address = std::stoul(brk_address, 0, 16);
+        else if (input_len == 4)
+        {
+            target_bank = 0;
+            target_address = (u16)std::stoul(brk_address_cpu, 0, 16);
+        }
+        else
+        {
+            return;
+        }
     }
-    else
+    catch(const std::invalid_argument&)
     {
         return;
     }
@@ -1719,6 +1913,8 @@ static void add_breakpoint(void)
     Memory::stDisassembleRecord** memoryMap = emu_get_core()->GetMemory()->GetDisassembledMemoryMap();
     Memory::stDisassembleRecord** romMap = emu_get_core()->GetMemory()->GetDisassembledROMMemoryMap();
     Memory::stDisassembleRecord** map = NULL;
+
+    bool rom = true;
 
     if ((target_address & 0xC000) == 0x0000)
     {
@@ -1732,17 +1928,100 @@ static void add_breakpoint(void)
     }
     else
     {
+        target_offset = target_address;
         map = memoryMap;
+        rom = false;
     }
 
-    brk_address[0] = 0;
+    brk_address_cpu[0] = 0;
 
     bool found = false;
-    std::vector<Memory::stDisassembleRecord*>* breakpoints = emu_get_core()->GetMemory()->GetBreakpoints();
+    std::vector<Memory::stDisassembleRecord*>* breakpoints = emu_get_core()->GetMemory()->GetBreakpointsCPU();
+
+    if (IsValidPointer(map[target_offset]))
+    {
+        for (long unsigned int b = 0; b < breakpoints->size(); b++)
+        {
+            if ((*breakpoints)[b] == map[target_offset])
+            {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found)
+    {
+        if (!IsValidPointer(map[target_offset]))
+        {
+            map[target_offset] = new Memory::stDisassembleRecord;
+
+            if (rom)
+            {
+                map[target_offset]->address = target_offset & 0x3FFF;
+                map[target_offset]->bank = target_offset >> 14;
+            }
+            else
+            {
+                map[target_offset]->address = 0;
+                map[target_offset]->bank = 0;
+            }
+
+            map[target_offset]->name[0] = 0;
+            map[target_offset]->bytes[0] = 0;
+            map[target_offset]->size = 0;
+            map[target_offset]->jump = false;
+            map[target_offset]->jump_address = 0;
+            for (int i = 0; i < 4; i++)
+                map[target_offset]->opcodes[i] = 0;
+        }
+
+        breakpoints->push_back(map[target_offset]);
+    }
+}
+
+static void add_breakpoint_mem(void)
+{
+    int input_len = (int)strlen(brk_address_mem);
+    u16 address1 = 0;
+    u16 address2 = 0;
+    bool range = false;
+
+    try
+    {
+        if ((input_len == 9) && (brk_address_mem[4] == '-'))
+        {
+            std::string str(brk_address_mem);
+            std::size_t separator = str.find("-");
+
+            if (separator != std::string::npos)
+            {
+                address1 = (u16)std::stoul(str.substr(0, separator), 0 , 16);
+                address2 = (u16)std::stoul(str.substr(separator + 1 , std::string::npos), 0, 16);
+                range = true;
+            }
+        }
+        else if (input_len == 4)
+        {
+            address1 = (u16)std::stoul(brk_address_mem, 0, 16);
+        }
+        else
+        {
+            return;
+        }
+    }
+    catch(const std::invalid_argument&)
+    {
+        return;
+    }
+
+    bool found = false;
+    std::vector<Memory::stMemoryBreakpoint>* breakpoints = emu_get_core()->GetMemory()->GetBreakpointsMem();
 
     for (long unsigned int b = 0; b < breakpoints->size(); b++)
     {
-        if ((*breakpoints)[b] == map[target_offset])
+        Memory::stMemoryBreakpoint temp = (*breakpoints)[b];
+        if ((temp.address1 == address1) && (temp.address2 == address2) && (temp.range == range))
         {
             found = true;
             break;
@@ -1751,8 +2030,23 @@ static void add_breakpoint(void)
 
     if (!found)
     {
-        breakpoints->push_back(map[target_offset]);
+        Memory::stMemoryBreakpoint new_breakpoint;
+        new_breakpoint.address1 = address1;
+        new_breakpoint.address2 = address2;
+        new_breakpoint.range = range;
+        new_breakpoint.read = brk_new_mem_read;
+        new_breakpoint.write = brk_new_mem_write;
+
+        breakpoints->push_back(new_breakpoint);
     }
+
+    brk_address_mem[0] = 0;
+}
+
+static void request_goto_address(u16 address)
+{
+    goto_address_requested = true;
+    goto_address_target = address;
 }
 
 static ImVec4 color_565_to_float(u16 color)
